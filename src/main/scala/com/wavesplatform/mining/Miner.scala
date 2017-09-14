@@ -21,7 +21,6 @@ import scorex.block.Block._
 import scorex.block.{Block, MicroBlock}
 import scorex.consensus.nxt.NxtLikeConsensusBlockData
 import scorex.transaction.PoSCalc._
-import scorex.transaction.ValidationError.GenericError
 import scorex.transaction._
 import scorex.utils.{ScorexLogging, Time}
 import scorex.wallet.Wallet
@@ -163,7 +162,7 @@ class MinerImpl(
       _ <- checkAge(height, history.lastBlockTimestamp().get)
       ts <- nextBlockGenerationTime(height, stateReader, blockchainSettings.functionalitySettings, lastBlock, account, featureProvider)
       offset = calcOffset(timeService, ts, minerSettings.minimalBlockGenerationOffset)
-      balance <- generatingBalance(stateReader, blockchainSettings.functionalitySettings, account, height).toEither.left.map(er => GenericError(er.getMessage))
+      balance = generatingBalance(stateReader, blockchainSettings.functionalitySettings, account, height)
     } yield (offset, balance)) match {
       case Right((offset, balance)) =>
         log.debug(s"Next attempt for acc=$account in $offset")

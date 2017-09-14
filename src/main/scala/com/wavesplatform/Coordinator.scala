@@ -123,8 +123,8 @@ object Coordinator extends ScorexLogging with Instrumented {
     _ <- Either.cond(checkpoint.isBlockValid(block.signerData.signature, history.height() + 1), (),
       GenericError(s"Block ${block.uniqueId} at height ${history.height() + 1} is not valid w.r.t. checkpoint"))
     _ <- blockConsensusValidation(history, featureProvider, settings, time.correctedTime(), block) { height =>
-      PoSCalc.generatingBalance(stateReader, settings.functionalitySettings, block.signerData.generator, height).toEither.left.map(_.toString)
-        .flatMap(validateEffectiveBalance(featureProvider, settings.functionalitySettings, block, height))
+      val balance = PoSCalc.generatingBalance(stateReader, settings.functionalitySettings, block.signerData.generator, height)
+        validateEffectiveBalance(featureProvider, settings.functionalitySettings, block, height)(balance)
     }
     height = history.height()
     discardedTxs <- blockchainUpdater.processBlock(block)
