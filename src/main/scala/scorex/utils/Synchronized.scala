@@ -2,7 +2,6 @@ package scorex.utils
 
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
-import com.google.common.base.Throwables
 import scorex.utils.Synchronized.{ReadLock, _}
 
 // http://vlkan.com/blog/post/2015/09/09/enforce-locking/
@@ -41,7 +40,7 @@ object Synchronized {
 
 }
 
-trait Synchronized extends ScorexLogging {
+trait Synchronized {
 
   def synchronizationToken: ReentrantReadWriteLock
 
@@ -82,12 +81,7 @@ trait Synchronized extends ScorexLogging {
 //    log.trace(s"locked $lock")
     try {
       body(lock)
-    } catch {
-      case e: Throwable =>
-        log.error(Throwables.getStackTraceAsString(e))
-        throw e
-    }
-    finally {
+    } finally {
       lock.unlock()
 //      log.trace(s"unlocked $lock")
     }

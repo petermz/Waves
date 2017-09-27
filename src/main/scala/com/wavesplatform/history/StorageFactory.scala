@@ -4,10 +4,11 @@ import java.io.File
 import java.util.concurrent.locks.{ReentrantReadWriteLock => RWL}
 import javax.sql.DataSource
 
+import com.wavesplatform.database.PostgresWriter
 import com.wavesplatform.features.FeatureProvider
 import com.wavesplatform.settings.{BlockchainSettings, FeaturesSettings}
 import com.wavesplatform.state2.reader.StateReader
-import com.wavesplatform.state2.{BlockchainUpdaterImpl, StateStorage, StateWriter, StateWriterImpl}
+import com.wavesplatform.state2.{BlockchainUpdaterImpl, StateStorage, StateWriter}
 import scorex.transaction._
 
 import scala.util.{Success, Try}
@@ -28,7 +29,7 @@ object StorageFactory {
     for {
       historyWriter <- HistoryWriterImpl(settings.blockchainFile, lock, settings.functionalitySettings, featuresSettings)
       ss <- createStateStorage(historyWriter, settings.stateFile)
-      stateWriter = new StateWriterImpl(ds)
+      stateWriter = new PostgresWriter(ds)
     } yield {
       val bcu = BlockchainUpdaterImpl(stateWriter, historyWriter, settings.functionalitySettings, settings.minimumInMemoryDiffSize, lock)
       val history: NgHistory with DebugNgHistory with FeatureProvider = bcu.historyReader

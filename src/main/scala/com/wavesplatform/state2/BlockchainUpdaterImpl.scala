@@ -53,20 +53,7 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with StateReader,
 
   def historyReader: NgHistory with DebugNgHistory with FeatureProvider = read { implicit l => new NgHistoryReader(() => ngState(), historyWriter) }
 
-  private def updatePersistedAndInMemory(): Unit = write { implicit l =>
-    logHeights("State rebuild started")
-    val persistFrom = persisted.height + 1
-    val persistUpTo = historyWriter.height() - minimumInMemoryDiffSize + 1
-
-    ranges(persistFrom, persistUpTo, minimumInMemoryDiffSize).foreach { case (head, last) =>
-      val diffToBePersisted = unsafeDiffByRange(persisted, head, last)
-      persisted.applyBlockDiff(diffToBePersisted, ???, 0)
-    }
-
-    bottomMemoryDiff.set(unsafeDiffByRange(persisted, persisted.height + 1, historyWriter.height() + 1))
-    topMemoryDiff.set(BlockDiff.empty)
-    logHeights("State rebuild finished")
-  }
+  private def updatePersistedAndInMemory(): Unit = {}
 
   override def processBlock(block: Block): Either[ValidationError, DiscardedTransactions] = write { implicit l =>
     if (topMemoryDiff().heightDiff >= minimumInMemoryDiffSize) {
@@ -143,7 +130,7 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with StateReader,
           if (height < persisted.height) {
             log.info(s"Rollback to h=$height requested. Persisted height=${persisted.height}, will drop state and reapply blockchain now")
             persisted.clear()
-            updatePersistedAndInMemory()
+            ???
           } else {
             if (bestLiquidState.height != height) {
               val persistedPlusBottomHeight = persisted.height + bottomMemoryDiff().heightDiff
@@ -228,7 +215,6 @@ object BlockchainUpdaterImpl {
     val blockchainUpdater =
       new BlockchainUpdaterImpl(persistedState, functionalitySettings, history, minimumInMemoryDiffSize, history, synchronizationToken)
     blockchainUpdater.logHeights("Constructing BlockchainUpdaterImpl")
-    blockchainUpdater.updatePersistedAndInMemory()
     blockchainUpdater
   }
 
