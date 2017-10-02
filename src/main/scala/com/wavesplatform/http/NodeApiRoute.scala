@@ -4,6 +4,7 @@ import javax.ws.rs.Path
 
 import akka.http.scaladsl.server.Route
 import com.wavesplatform.Shutdownable
+import com.wavesplatform.features.FeatureProvider
 import com.wavesplatform.settings.{Constants, RestAPISettings}
 import io.swagger.annotations._
 import play.api.libs.json.Json
@@ -12,11 +13,11 @@ import scorex.utils.ScorexLogging
 
 @Path("/node")
 @Api(value = "node")
-case class NodeApiRoute(settings: RestAPISettings, application: Shutdownable)
+case class NodeApiRoute(settings: RestAPISettings, featureProvider: FeatureProvider, application: Shutdownable)
   extends ApiRoute with CommonApiFunctions with ScorexLogging {
 
   override lazy val route = pathPrefix("node") {
-    stop ~ status ~ version
+    stop ~ status ~ version ~ activation
   }
 
   @Path("/version")
@@ -26,6 +27,15 @@ case class NodeApiRoute(settings: RestAPISettings, application: Shutdownable)
   ))
   def version: Route = (get & path("version")) {
     complete(Json.obj("version" -> Constants.AgentName))
+  }
+
+  @Path("/activation")
+  @ApiOperation(value = "Activation", notes = "Get activation status", httpMethod = "GET")
+  @ApiResponses(Array(
+    new ApiResponse(code = 200, message = "Json activation status")
+  ))
+  def activation: Route = (get & path("version")) {
+    complete(Json.obj("activation" -> Constants.AgentName))
   }
 
   @Path("/stop")

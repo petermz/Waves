@@ -90,7 +90,7 @@ class Application(val actorSystem: ActorSystem, val settings: WavesSettings) ext
       DebugApiRoute(settings.restAPISettings, wallet, stateReader, history, peerDatabase, establishedConnections, blockchainUpdater, allChannels, utxStorage, blockchainDebugInfo, miner),
       WavesApiRoute(settings.restAPISettings, wallet, utxStorage, allChannels, time),
       AssetsApiRoute(settings.restAPISettings, wallet, utxStorage, allChannels, stateReader, time),
-      NodeApiRoute(settings.restAPISettings, () => this.shutdown()),
+      NodeApiRoute(settings.restAPISettings, featureProvider, () => this.shutdown()),
       AssetsBroadcastApiRoute(settings.restAPISettings, utxStorage, allChannels),
       LeaseApiRoute(settings.restAPISettings, wallet, utxStorage, allChannels, stateReader, time),
       LeaseBroadcastApiRoute(settings.restAPISettings, utxStorage, allChannels),
