@@ -53,8 +53,6 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with StateReader,
 
   def historyReader: NgHistory with DebugNgHistory with FeatureProvider = read { implicit l => new NgHistoryReader(() => ngState(), historyWriter) }
 
-  private def updatePersistedAndInMemory(): Unit = {}
-
   override def processBlock(block: Block): Either[ValidationError, DiscardedTransactions] = write { implicit l =>
     if (topMemoryDiff().heightDiff >= minimumInMemoryDiffSize) {
       persisted.applyBlockDiff(bottomMemoryDiff(), ???, ???)
