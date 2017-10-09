@@ -5,4 +5,5 @@ import java.time.Duration
 case class MinerSettings(
   enable: Boolean,
   quorum: Int,
+  enableGrinding: Boolean,
   intervalAfterLastBlockThenGenerationIsAllowed: Duration)
