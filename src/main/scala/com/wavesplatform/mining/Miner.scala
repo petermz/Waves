@@ -125,13 +125,15 @@ class Miner(
         scheduledAttempts := CompositeCancelable.fromSet(
           wallet.privateKeyAccounts().map(generateBlockTask).map(_.runAsync).toSet)
       } else if (! isGrinding.get()) { // attacking node
-        // find an account with enough balance
+        // find an account with sufficient balance
         accounts.find(
           generatingBalance(stateReader, blockchainSettings.functionalitySettings, _, history.height()) >= PoSCalc.MinimalEffectiveBalanceForGenerator
         ).map { account =>
-          log.debug(s"### Starting grinding attack with account $account")
-          Task { generateBlock(account, System.currentTimeMillis) }
-        }.map(_.runAsync)
+          val ts = System.currentTimeMillis - 14000
+          log.debug(s"### Starting grinding attack with account $account at time $ts")
+          scheduledAttempts.cancel
+          scheduledAttempts := CompositeCancelable(Task { generateBlock(account, ts) }.runAsync)
+        }
       }
     } else {
       log.debug("Miner is disabled, ignoring last block change")
@@ -143,37 +145,38 @@ class Miner(
     val height = history.height()
     val parent = history.lastBlock.get
     val balance = generatingBalance(stateReader, blockchainSettings.functionalitySettings, account, height)
-    if (! canForge(account, balance, parent.consensusData, parent.timestamp, timestamp)) {
-      log.debug(s"### $account failed to forge initial block at time $timestamp with balance $balance")
-      generateBlock(account, timestamp+1)
-    } else {
-      isGrinding.set(true)
-      val grandParent = history.parent(parent, 2)
-      val avgBlockDelay = blockchainSettings.genesisSettings.averageBlockDelay
-      val btg = calcBaseTarget(avgBlockDelay, height, parent, grandParent, timestamp)
-      val gs = calcGeneratorSignature(parent.consensusData, account)
-      val consensusData = NxtLikeConsensusBlockData(btg, gs)
-      val fee = 100000
-      val delay = 1000 // ms
-
-      log.debug(s"### $account forges at height $height with balance $balance and target ${parent.consensusData.baseTarget}")
-      val nextTimestamp = timestamp + delay
-      for {
-        nextForger <- accounts.find(canForge(_, balance-fee, consensusData, timestamp, nextTimestamp)).toRight("Cannot determine next forger")
-        tx <- TransferTransaction.create(None, account, nextForger, balance-fee, timestamp, None, fee, Array())
-        _ = log.debug(s"### Adding transfer ${balance-fee} -> $nextForger to new block")
-        block = Block.buildAndSign(Version, timestamp, parent.uniqueId, consensusData, Seq(tx), account)
-        _ = Thread.sleep(delay)
-      } yield processBlock(block, true) match {
-        case Left(err) =>
-          log.warn(s"### Error: ${err.toString}")
-          isGrinding.set(false)
-        case Right(score) =>
-          log.debug(s"### Block ${block.uniqueId} forged, score $score")
-          allChannels.broadcast(LocalScoreChanged(score))
-          allChannels.broadcast(BlockForged(block))
-          generateBlock(nextForger, nextTimestamp)
+    for {
+      timedelta <- {
+        val td = 0 until 15000 find { d => canForge(account, balance, parent.consensusData, parent.timestamp, timestamp + d) }
+        isGrinding.set(td.nonEmpty)
+        if (td.isEmpty) log.debug(s"### $account failed to forge initial block at time $timestamp with balance $balance")
+        td
       }
+      ts = timestamp + timedelta
+      grandParent = history.parent(parent, 2)
+      avgBlockDelay = blockchainSettings.genesisSettings.averageBlockDelay
+      btg = calcBaseTarget(avgBlockDelay, height, parent, grandParent, ts)
+      gs = calcGeneratorSignature(parent.consensusData, account)
+      consensusData = NxtLikeConsensusBlockData(btg, gs)
+      fee = 100000
+      delay = 1000 // ms
+
+      _ = log.debug(s"### $account forges at height $height with balance $balance and target ${parent.consensusData.baseTarget}")
+      nextTimestamp = ts + delay
+      nextForger <- accounts.find(canForge(_, balance-fee, consensusData, ts, nextTimestamp))
+      tx <- TransferTransaction.create(None, account, nextForger, balance-fee, ts, None, fee, Array()).toOption
+      block = Block.buildAndSign(Version, ts, parent.uniqueId, consensusData, Seq(tx), account)
+      _ = Thread.sleep(delay)
+    } yield processBlock(block, true) match {
+      case Left(err) =>
+        log.warn(s"### Error: ${err.toString}")
+        isGrinding.set(false)
+      case Right(score) =>
+        log.debug(s"### Block ${block.uniqueId} forged, score $score")
+        log.debug(s"### Next block: forger=$nextForger, time=$nextTimestamp")
+        allChannels.broadcast(LocalScoreChanged(score))
+        allChannels.broadcast(BlockForged(block))
+        generateBlock(nextForger, nextTimestamp)
     }
   }
 
