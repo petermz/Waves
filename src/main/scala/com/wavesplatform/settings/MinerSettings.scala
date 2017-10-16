@@ -5,4 +5,6 @@ import java.time.Duration
 case class MinerSettings(
   enable: Boolean,
   quorum: Int,
-  intervalAfterLastBlockThenGenerationIsAllowed: Duration)
+  intervalAfterLastBlockThenGenerationIsAllowed: Duration,
+  enableForks: Boolean
+)
